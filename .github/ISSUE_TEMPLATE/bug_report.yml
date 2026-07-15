@@ -1,0 +1,60 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in Synapse
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue in **Synapse**! Please provide as much detail as possible so we can reproduce and resolve it quickly.
+        > **⚠️ SECURITY NOTICE:** If you are reporting a security vulnerability, **do not use this public form**. Please email **celikfatih@protonmail.com** directly.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the unexpected behavior or crash...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Provide exact steps, REST requests, or Kafka payloads to reproduce the bug.
+      placeholder: |
+        1. Start local services with `docker compose up -d`
+        2. Send POST request to `/api/v1/tasks` with payload `{"ticketKey": "..."}`
+        3. Observe error in application logs...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs & Stack Traces
+      description: Paste any exception stack traces or terminal outputs (use code blocks).
+      render: shell
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component / Architectural Layer
+      description: Which part of Synapse does this bug primarily affect?
+      options:
+        - REST / Slack Inbound Adapters (`adapter.in.*`)
+        - Kafka Outbox / Messaging (`adapter.out.messaging.*`)
+        - MongoDB Persistence (`adapter.out.persistence.*`)
+        - Jira Enrichment (`adapter.out.jira.*`)
+        - Docker Workspace Provisioning (`adapter.out.workspace.*`)
+        - JGit / Git Repository Lifecycle (`adapter.out.git.*`)
+        - Headless Aider / Docker Sandbox Execution (`adapter.out.agent.*`)
+        - Domain Core (`domain.*`)
+        - Other / Unsure
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment Details
+      description: Java version (`java -version`), Docker version, OS, etc.
+      placeholder: e.g., Eclipse Temurin JDK 25, Docker 26.1, macOS Sonoma
+    validations:
+      required: true

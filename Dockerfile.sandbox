@@ -1,0 +1,27 @@
+# ==============================================================================
+# Synapse Autonomous Agent Sandbox Image (Java 25 + Headless Aider Engine)
+# ==============================================================================
+
+FROM eclipse-temurin:25-jdk-jammy
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+git \
+curl \
+python3 \
+python3-pip \
+python3-venv \
+&& rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash sandbox \
+&& mkdir -p /workspace /home/sandbox \
+&& chown -R sandbox:sandbox /home/sandbox /workspace
+
+USER sandbox
+WORKDIR /workspace
+
+ENV PATH="/home/sandbox/.local/bin:${PATH}"
+
+RUN python3 -m pip install uv \
+&& uv tool install aider-chat==0.86.2
+
+CMD ["tail", "-f", "/dev/null"]

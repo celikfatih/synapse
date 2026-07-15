@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a Security Vulnerability
+    url: mailto:celikfatih@protonmail.com?subject=[SECURITY]%20Synapse%20Vulnerability%20Report
+    about: For high-priority or sensitive security vulnerabilities, please email maintainer directly rather than opening a public issue.
+  - name: Read Contributing Guide
+    url: https://github.com/celikfatih/synapse/blob/main/CONTRIBUTING.md
+    about: Learn how to set up Docker Compose, run ./gradlew test, and follow our architectural rules.

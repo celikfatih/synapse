@@ -1,0 +1,45 @@
+name: CI / Verification Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (Java 25)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (Eclipse Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Make Gradle Wrapper Executable
+        run: chmod +x ./gradlew
+
+      - name: Run Unit & Integration Tests and Generate Coverage
+        run: ./gradlew test jacocoTestReport --no-daemon
+
+      - name: Build Application Artifacts
+        run: ./gradlew build -x test --no-daemon
+
+      - name: Verify Docker Sandbox Image Build
+        run: docker build -t synapse-sandbox:java25 -f Dockerfile.sandbox .
+
+      - name: Publish Test and JaCoCo Coverage Reports (Artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-test-and-coverage-reports
+          path: |
+            build/reports/tests/test/
+            build/reports/jacoco/test/
+          retention-days: 14

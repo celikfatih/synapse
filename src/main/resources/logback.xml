@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <property name="LOG_PATH" value="logs"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>${CONSOLE_LOG_THRESHOLD}</level>
+        </filter>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd} | %d{HH:mm:ss.SSS} | %-20.20thread | %-5level | %-40.40logger{45} | traceId:%X{traceId} | spanId:%X{spanId} | correlationId:%X{correlationId} | %msg%n</pattern>
+            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/synapse-application.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd} | %d{HH:mm:ss.SSS} | %-20.20thread | %-5level | %-40.40logger{45} | traceId:%X{traceId} | spanId:%X{spanId} | correlationId:%X{correlationId} | %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/synapse-application.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <maxFileSize>10MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+
+    <logger name="org.apache.kafka" level="ERROR"/>
+    <logger name="org.mongodb.driver" level="ERROR"/>
+    <logger name="org.springframework.kafka" level="ERROR"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>
