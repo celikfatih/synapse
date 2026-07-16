@@ -142,9 +142,9 @@ flowchart TD
 - **Consumer Anti-Corruption Layer (`CorrelationIdRecordInterceptor`)**: Encapsulated in its own dedicated component inside `dev.synapse.adapter.in.messaging.interceptor`. Before any `@KafkaListener` executes or when `TaskEventConsumerRecordRecoverer` handles DLQ recovery, `CorrelationIdRecordInterceptor.extractAndSet(record)` guarantees that `correlationId` is extracted from W3C baggage or direct Kafka headers and bound to `TracingContext` (`MDC`), preventing missing correlation IDs across rolling restarts, retries, or heterogeneous producers.
 ---
 
-## 3. Future Architecture (To-Be Agentic Execution & Notification Pipeline)
+## 3. Future Architecture (To-Be Notification Pipeline)
 
-With workspace provisioning, Jira enrichment, and Git cloning fully implemented, the remaining stages of the Synapse pipeline integrate headless AI execution (`AgenticExecutionPort`), Git push/PR creation, and Slack notification dispatch (`NotificationPort`).
+With workspace provisioning, Jira enrichment, Git cloning/pushing, Aider execution, and PR creation fully implemented, the remaining stage of the Synapse pipeline is Slack notification dispatch (`NotificationPort`).
 
 ```mermaid
 flowchart TD
@@ -156,32 +156,23 @@ flowchart TD
     AppService["TaskWorkflowApplicationService (Workflow Orchestrator)"]:::core
 
     subgraph FUTURE_PORTS [To-Be Outbound Ports]
-        AgentPort(["AgenticExecutionPort"]):::port
-        GitCommitPort(["GitRepositoryPort (Commit, Push & PR)"]):::port
         NotifyPort(["NotificationPort"]):::port
     end
 
     subgraph FUTURE_ADAPTERS [To-Be Adapters]
-        AgentAdapter["AiderHeadlessExecutionAdapter"]:::adapter
-        GitCLIAdapter["JGit / CLI Git PR Adapter"]:::adapter
         SlackNotifyAdapter["SlackWebhookNotificationAdapter"]:::adapter
     end
 
     subgraph EXTERNAL_SYSTEMS [External Services]
-        Sandbox["Isolated Docker Sandbox Container"]:::external
-        GitOrigin["Remote Git Origin (GitHub / GitLab)"]:::external
         Slack["Slack Channel / User DM"]:::external
     end
 
-    AppService -->|"1. execute(request)"| AgentPort --> AgentAdapter --> Sandbox
-    AppService -->|"2. commitAndPush(workspace, branch)"| GitCommitPort --> GitCLIAdapter --> GitOrigin
-    AppService -->|"3. notify(result)"| NotifyPort --> SlackNotifyAdapter --> Slack
+    AppService -->|"notify(result, prUrl)"| NotifyPort --> SlackNotifyAdapter --> Slack
 ```
 
-1. **`AgenticExecutionPort` (`DockerAiderExecutionAdapter` & `AiderHeadlessExecutionAdapter`)**: Launches the open-source **Aider** headless coding CLI inside the provisioned workspace container (`synapse-sandbox:java25`) to perform AST symbol indexing, code editing, and automated test verification (`--test-cmd`).
-2. **Git Commit & Pull Request Creation (`GitRepositoryPort`)**: After Aider successfully exits with a passing test suite (`Green State`), Synapse stages changes, formats a conventional commit (`feat(PAY-123): ...`), pushes the feature branch to remote origin, and opens a Pull Request.
-3. **Notification Dispatch (`NotificationPort` / `SlackWebhookNotificationAdapter`)**: Sends structured Slack messages summarizing the PR diff or reporting diagnostic logs if the task fails.
+1. **Notification Dispatch (`NotificationPort` / `SlackWebhookNotificationAdapter`)**: Sends structured Slack messages summarizing the PR diff (`prUrl`) or reporting diagnostic logs if the task fails.
 
+---
 ---
 
 ## 4. Headless Aider Execution Engine Architecture

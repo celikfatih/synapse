@@ -28,6 +28,7 @@ public class MongoTaskStoreAdapter implements SaveTaskPort, LoadTaskPort {
         document.setSource(task.getSource().value());
         document.setStatus(task.getStatus().name());
         document.setRequester(task.getRequester().name());
+        document.setPullRequestUrl(task.getPullRequestUrl() != null ? task.getPullRequestUrl().value() : null);
 
         mongoTaskRepository.save(document);
     }
@@ -45,6 +46,7 @@ public class MongoTaskStoreAdapter implements SaveTaskPort, LoadTaskPort {
                 document.getMessage(),
                 document.getSource(),
                 document.getCorrelationId(),
-                document.getStatus());
+                document.getStatus(),
+                document.getPullRequestUrl());
     }
 }

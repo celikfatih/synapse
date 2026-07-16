@@ -58,6 +58,7 @@ synapse:
     project: ${SYNAPSE_JIRA_PROJECT}
   git:
     token: ${SYNAPSE_GIT_TOKEN}
+    default-base-branch: ${SYNAPSE_GIT_DEFAULT_BASE_BRANCH}
   agent:
     docker:
       image: ${SYNAPSE_AGENT_DOCKER_IMAGE}

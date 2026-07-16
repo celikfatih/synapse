@@ -1,6 +1,7 @@
 package dev.synapse.application.service;
 
 import dev.synapse.application.port.out.AgenticExecutionPort;
+import dev.synapse.application.port.out.CreatePullRequestPort;
 import dev.synapse.application.port.out.GitRepositoryPort;
 import dev.synapse.application.port.out.JiraEnrichmentPort;
 import dev.synapse.application.port.out.LoadTaskPort;
@@ -50,6 +51,9 @@ class TaskWorkflowApplicationServiceTest {
     @Mock
     private AgenticExecutionPort agenticExecutionPort;
 
+    @Mock
+    private CreatePullRequestPort createPullRequestPort;
+
     @InjectMocks
     private TaskWorkflowApplicationService taskWorkflowApplicationService;
 
@@ -82,6 +86,8 @@ class TaskWorkflowApplicationServiceTest {
         when(agenticExecutionPort.execute(any())).thenReturn(
                 AgentExecutionResult.success(task.getId().getValue(), "Done", "logs")
         );
+        when(createPullRequestPort.createPullRequest(any(), any(), any(), any()))
+                .thenReturn("https://github.com/override/repo/pull/1");
 
         // when
         taskWorkflowApplicationService.handleSubmitted(event);
@@ -91,8 +97,11 @@ class TaskWorkflowApplicationServiceTest {
         verify(jiraEnrichmentPort).enrichTask("PAY-1042");
         verify(workspaceProvisioningPort).provisionWorkspace(task.getId().getValue(), "git@github.com:override/repo.git");
         verify(agenticExecutionPort).execute(any(AgentExecutionRequest.class));
+        verify(gitRepositoryPort).commitAndPush(any(), any());
+        verify(createPullRequestPort).createPullRequest(any(), any(), any(), any());
         verify(saveTaskPort, times(2)).save(task);
         assertThat(task.getStatus()).isEqualTo(TaskStatus.COMPLETED);
+        assertThat(task.getPullRequestUrl()).isEqualTo(new dev.synapse.domain.task.PullRequestUrl("https://github.com/override/repo/pull/1"));
     }
 
     @Test
@@ -124,6 +133,8 @@ class TaskWorkflowApplicationServiceTest {
         when(agenticExecutionPort.execute(any())).thenReturn(
                 AgentExecutionResult.success(task.getId().getValue(), "Done", "logs")
         );
+        when(createPullRequestPort.createPullRequest(any(), any(), any(), any()))
+                .thenReturn("https://github.com/jira-default/repo/pull/2");
 
         // when
         taskWorkflowApplicationService.handleSubmitted(event);
@@ -138,8 +149,11 @@ class TaskWorkflowApplicationServiceTest {
                 "feat/" + task.getId().getValue()
         );
         verify(agenticExecutionPort).execute(any(AgentExecutionRequest.class));
+        verify(gitRepositoryPort).commitAndPush(any(), any());
+        verify(createPullRequestPort).createPullRequest(any(), any(), any(), any());
         verify(saveTaskPort, times(2)).save(task);
         assertThat(task.getStatus()).isEqualTo(TaskStatus.COMPLETED);
+        assertThat(task.getPullRequestUrl()).isEqualTo(new dev.synapse.domain.task.PullRequestUrl("https://github.com/jira-default/repo/pull/2"));
     }
 
     @Test

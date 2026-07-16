@@ -35,7 +35,8 @@ Modern engineering teams face a continuous flood of alerts from monitoring syste
 4. **Provisions isolated Docker sandboxes** (`synapse-sandbox:java25`) with strict CPU/memory quotas.
 5. **Clones & checks out feature branches** (`feat/TASK-123`) securely via token authentication (`SYNAPSE_GIT_TOKEN`).
 6. **Delegates autonomous coding** to headless **[Aider](https://aider.chat/)** (`aider --yes --test-cmd "./gradlew test"`), allowing the AI to index repository AST maps, edit files, run tests, and auto-heal compiler failures offline.
-7. **Pushes verified commits & notifies teams** on Slack when the Pull Request is ready for review.
+7. **Commits, pushes & opens GitHub Pull Requests** (`CreatePullRequestPort` & `GitHubRestPullRequestAdapter`) automatically when tests pass, attaching the PR link (`Task.pullRequestUrl`) across MongoDB.
+8. **Notifies teams** on Slack when the Pull Request is ready for review.
 
 ---
 
@@ -48,6 +49,7 @@ Modern engineering teams face a continuous flood of alerts from monitoring syste
 | **Transactional Outbox Pattern**        | Guaranteed at-least-once event delivery without two-phase commit overhead. Task state changes (`MongoDB`) and domain events are committed atomically before Kafka dispatch. |
 | **Full Auditability & Tracing**         | End-to-end correlation (`correlationId`) powered by OpenTelemetry (`W3C Baggage`) and a decoupled `CorrelationIdRecordInterceptor` Anti-Corruption Layer, ensuring unbroken log traceability across REST, Slack, Kafka retries, and Docker sandboxes. |
 | **AST Repo-Map & Self-Healing Tests**   | Integrates Aider's tree-sitter AST symbol indexer and `--test-cmd` verification loops. If a test fails after an edit, error outputs are automatically fed back to self-heal code. |
+| **Autonomous Pull Request Creation**    | Once unit and integration tests pass inside the container (`Green State`), Synapse stages changes, formats conventional commits (`feat(TASK-123): ...`), pushes the feature branch using Eclipse JGit token authentication, opens a GitHub Pull Request (`CreatePullRequestPort` / `GitHubRestPullRequestAdapter`), and attaches the PR URL directly to the task document (`Task.pullRequestUrl`). |
 
 ---
 

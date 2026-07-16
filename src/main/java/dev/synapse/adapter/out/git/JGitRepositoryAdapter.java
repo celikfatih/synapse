@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.PushCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.springframework.stereotype.Component;
@@ -51,6 +52,33 @@ public class JGitRepositoryAdapter implements GitRepositoryPort {
                     repositoryUrl, e.getMessage());
         } catch (Exception e) {
             log.warn("Error cloning repository into [{}]: {}", workspacePath, e.getMessage());
+        }
+    }
+
+    @Override
+    public void commitAndPush(Path workspacePath, String commitMessage) {
+        try (Git git = Git.open(workspacePath.toFile())) {
+            log.info("Staging changes in workspace [{}]", workspacePath);
+            git.add().addFilepattern(".").call();
+
+            log.info("Committing changes with message: {}", commitMessage);
+            git.commit().setMessage(commitMessage).call();
+
+            log.info("Pushing feature branch from [{}] to remote origin", workspacePath);
+            PushCommand pushCommand = git.push();
+            if (gitProperties != null && gitProperties.getToken() != null && !gitProperties.getToken().isBlank()) {
+                log.debug("Authenticating push with GitHub organization via token");
+                pushCommand.setCredentialsProvider(new UsernamePasswordCredentialsProvider(
+                        gitProperties.getToken(),
+                        ""
+                ));
+            }
+            pushCommand.call();
+            log.info("Successfully pushed branch to remote origin for workspace [{}]", workspacePath);
+        } catch (GitAPIException e) {
+            log.warn("Git API error during commit and push in [{}]: {}", workspacePath, e.getMessage());
+        } catch (Exception e) {
+            log.warn("Error committing and pushing repository in [{}]: {}", workspacePath, e.getMessage());
         }
     }
 }

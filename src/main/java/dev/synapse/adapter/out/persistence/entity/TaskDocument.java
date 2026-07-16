@@ -30,6 +30,7 @@ public class TaskDocument {
     private String source;
     private String status;
     private String requester;
+    private String pullRequestUrl;
 
     @CreatedBy
     private String createdBy;

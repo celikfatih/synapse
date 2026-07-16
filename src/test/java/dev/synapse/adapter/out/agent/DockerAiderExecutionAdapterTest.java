@@ -22,7 +22,7 @@ class DockerAiderExecutionAdapterTest {
     @BeforeEach
     void setUp() {
         AgentProperties agentProperties = new AgentProperties("synapse-sandbox:java25", "/workspace", "8g", "4", 1800L, "qwen2.5-coder:7b", "http://localhost:8080");
-        GitProperties gitProperties = new GitProperties("test-git-token");
+        GitProperties gitProperties = new GitProperties("test-git-token", "");
         adapter = new DockerAiderExecutionAdapter(agentProperties, gitProperties);
     }
 

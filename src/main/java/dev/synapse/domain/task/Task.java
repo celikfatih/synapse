@@ -10,6 +10,7 @@ public class Task {
     private final Source source;
     private final CorrelationId correlationId;
     private TaskStatus status;
+    private PullRequestUrl pullRequestUrl;
 
     public record TaskId(String value) {
         public TaskId {
@@ -66,12 +67,22 @@ public class Task {
     }
 
     public Task(String id, String requester, String message, String source, String correlationId, String status) {
+        this(id, requester, message, source, correlationId, status, (PullRequestUrl) null);
+    }
+
+    public Task(String id, String requester, String message, String source, String correlationId, String status, PullRequestUrl pullRequestUrl) {
         this.id = new TaskId(id);
         this.requester = new Requester(requester);
         this.message = new Message(message);
         this.source = new Source(source);
         this.correlationId = new CorrelationId(correlationId);
         this.status = TaskStatus.valueOf(status);
+        this.pullRequestUrl = pullRequestUrl;
+    }
+
+    public Task(String id, String requester, String message, String source, String correlationId, String status, String pullRequestUrl) {
+        this(id, requester, message, source, correlationId, status,
+                pullRequestUrl != null && !pullRequestUrl.isBlank() ? new PullRequestUrl(pullRequestUrl) : null);
     }
 
     public TaskId getId() {
@@ -96,6 +107,18 @@ public class Task {
 
     public CorrelationId getCorrelationId() {
         return correlationId;
+    }
+
+    public PullRequestUrl getPullRequestUrl() {
+        return pullRequestUrl;
+    }
+
+    public void attachPullRequestUrl(PullRequestUrl pullRequestUrl) {
+        this.pullRequestUrl = pullRequestUrl;
+    }
+
+    public void attachPullRequestUrl(String pullRequestUrl) {
+        this.pullRequestUrl = pullRequestUrl != null && !pullRequestUrl.isBlank() ? new PullRequestUrl(pullRequestUrl) : null;
     }
 
     public void startProcessing() {
