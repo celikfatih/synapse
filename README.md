@@ -1,4 +1,5 @@
-<div style="text-align: center;">
+<!-- noinspection HtmlDeprecatedAttribute -->
+<div align="center">
 
 # Synapse
 
@@ -194,6 +195,7 @@ Synapse adheres to industry-standard open-source governance practices, emphasizi
 
 ---
 
-<div style="text-align: center;">
+<!-- noinspection HtmlDeprecatedAttribute -->
+<div align="center">
   Built with ❤️ for resilient, verifiable AI engineering.
 </div>
