@@ -48,6 +48,8 @@ Because Synapse executes automated code modifications and shell verification com
    Headless Aider executes with `--no-auto-commits`. The AI inside the sandbox cannot push arbitrary commits directly to remote origins. Synapse's control plane (`GitRepositoryPort` / `JGitRepositoryAdapter`) validates the test outcome before signing and pushing commits using isolated HTTPS token credentials (`SYNAPSE_GIT_TOKEN`).
 3. **Correlation & Audit Logging**:
    Every incoming webhook (`Slack`, `REST`) generates a unique `CorrelationId` propagated through the Outbox, Kafka record headers, and container execution logs to ensure full cryptographic and operational traceability.
+4. **Inbound Slack Signature Verification (`X-Slack-Signature`)**:
+   All incoming Slack webhook requests (`/api/slack/events`, `/api/slack/commands`) pass through `SlackSignatureVerificationFilter`. Every request must include the `X-Slack-Request-Timestamp` and `X-Slack-Signature` headers. The filter verifies that the request timestamp is within 5 minutes of the system clock (preventing replay attacks) and verifies the HMAC-SHA256 signature (`v0=...`) calculated over `v0:<timestamp>:<body_bytes>` against the configured secret (`SYNAPSE_SLACK_SIGNING_SECRET`). Any missing, outdated, or invalid signature immediately yields HTTP `401 Unauthorized`.
 
 ---
 

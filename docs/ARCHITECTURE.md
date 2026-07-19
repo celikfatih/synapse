@@ -28,6 +28,7 @@ flowchart TD
     subgraph PRODUCER_IN [Producer Inbound Layer]
         User(["External Alert / Developer"]):::ext
         ApiAdapter["ApiTaskRestAdapter"]:::adapterIn
+        SlackFilter["SlackSignatureVerificationFilter"]:::adapterIn
         SlackAdapter["SlackTaskRestAdapter"]:::adapterIn
     end
 
@@ -71,10 +72,12 @@ flowchart TD
         DockerWSAdapter["DockerWorkspaceProvisioningAdapter (@Profile prod)"]:::adapterOut
         GitPort(["GitRepositoryPort"]):::portOut
         JGitAdapter["JGitRepositoryAdapter (Eclipse JGit + Token Auth)"]:::adapterOut
+        NotifyPort(["SendNotificationPort"]):::portOut
+        SlackNotifyAdapter["SlackWebhookNotificationAdapter"]:::adapterOut
     end
 
     User -->|"HTTP POST /api/v1/tasks"| ApiAdapter
-    User -->|"Slack Webhook"| SlackAdapter
+    User -->|"Slack Webhook / Command"| SlackFilter --> SlackAdapter
     ApiAdapter -->|"SubmitTaskCommand"| SubmitUC
     SlackAdapter -->|"SubmitTaskCommand"| SubmitUC
     SubmitUC --> SubmitHandler
@@ -99,12 +102,15 @@ flowchart TD
     WorkspacePort --> LocalWSAdapter
     WorkspacePort --> DockerWSAdapter
     AppService -->|"3. cloneAndCheckout(repoUrl, workspacePath, branch)"| GitPort --> JGitAdapter
+    AppService -->|"4. sendNotification(NotificationRequest)"| NotifyPort --> SlackNotifyAdapter
 ```
 
 ### Thorough Breakdown of Implemented As-Is Components:
 
 #### 1. Inbound REST & Slack Ingestion (`SubmitTaskUseCase`)
-- **`ApiTaskRestAdapter` & `SlackTaskRestAdapter`**: Inbound REST controllers converting external payloads into immutable `SubmitTaskCommand` objects.
+- **`SlackSignatureVerificationFilter`**: Once-per-request filter enforcing HMAC-SHA256 signature verification (`X-Slack-Signature`) against `synapse.slack.signing-secret` (`SYNAPSE_SLACK_SIGNING_SECRET`) across `/api/slack/*`.
+- **`ApiTaskRestAdapter` & `SlackTaskRestAdapter`**: Inbound REST controllers converting external payloads into immutable `SubmitTaskCommand` objects. `SlackTaskRestAdapter` handles `url_verification` handshakes, `app_mention` events, `/synapse` slash commands, and legacy endpoints. To prevent duplicate task submissions from retried deliveries during network latency, `SlackTaskRestAdapter` checks the `X-Slack-Retry-Num` header and immediately acknowledges retries (`200 OK`). *(For full Slack dashboard setup and workspace installation instructions, see [Slack Setup & Installation Guide](SLACK_SETUP.md)).*
+- **`SlackPayloadTranslator` & Event Deduplication**: Intelligent event translator supporting `app_mention` and `message` events. When both `app_mentions:read` and `message.channels` are enabled in Slack, a single channel mention fires both events. `SlackPayloadTranslator` deduplicates this by processing `app_mention` and automatically ignoring `message` events in regular channels/groups (`channel_type != "im"`), while fully supporting direct message (`D...` / `im`) task submissions.
 - **`SubmitTaskUseCaseHandler`**: Inside an atomic `@Transactional` boundary (`submit()`), it generates a correlation ID, persists the initial `ACCEPTED` task to MongoDB (`SaveTaskPort`), and writes an `UNPUBLISHED` `TaskSubmittedEvent` to the transactional outbox (`SaveDomainEventPort`).
 
 #### 2. Outbox Scheduler & Kafka Publishing
@@ -126,25 +132,30 @@ flowchart TD
   - **`LocalGitWorkspaceProvisioningAdapter` (`@Profile({"local", "test"})`)**: Creates fast temporary filesystem directories under `SYNAPSE_WORKSPACE_HOST_PATH`.
   - **`DockerWorkspaceProvisioningAdapter` (`@Profile("prod")`)**: Prepares directories under `SYNAPSE_WORKSPACE_HOST_PATH` and configures host volume mappings for isolated Docker sandbox execution.
 
-#### 6. Git Lifecycle & Token Authentication (`GitRepositoryPort` & `JGitRepositoryAdapter`)
-- **Dedicated Git Outbound Port**: Encapsulates network Git operations (`cloneAndCheckout`).
+#### 6. Git Lifecycle, Pre-Flight Handshake & Token Authentication (`GitRepositoryPort`, `JGitRepositoryAdapter`, `CreatePullRequestPort`)
+- **Pre-flight Repository Handshake (`validateRepositoryExists`)**: Before provisioning workspace directories or spawning Docker sandboxes, `TaskWorkflowApplicationService` invokes `GitRepositoryPort.validateRepositoryExists(repoUrl)`. Implemented via JGit `lsRemoteRepository()`, this performs a fast remote reference check over HTTPS to verify repository existence, URL correctness, and token access rights, aborting cleanly early if invalid (`handleFailedSubmission`).
 - **Eclipse JGit Adapter (`JGitRepositoryAdapter`)**: Clones remote Git repositories into the provisioned workspace directory and creates a feature branch (`feat/<taskId>`).
-- **Token-Only Authentication (`GitProperties`)**: Configured via `synapse.git.token` (environment variable `SYNAPSE_GIT_TOKEN`). Does not use or require a GitHub username parameter. When `token` is present, `JGitRepositoryAdapter` attaches a `UsernamePasswordCredentialsProvider(token, "")` over HTTPS to authenticate securely against private GitHub Organization repositories.
+- **Dynamic Pull Request Target Branch Resolution (`GitHubRestPullRequestAdapter`)**: Implements `CreatePullRequestPort` using Spring `RestClient`. Rather than hardcoding `base: "main"`, `resolveBaseBranch()` dynamically queries `GET /repos/{owner}/{repo}` to detect the target repository's true default branch (`main`, `master`, `develop`), eliminating GitHub `422 Unprocessable Content (base: invalid)` errors during PR creation.
+- **Organization Personal Access Token (PAT) & SSO Authentication**: Configured via `synapse.git.token` (`SYNAPSE_GIT_TOKEN`). Supports both Classic PATs (with SAML SSO authorization enabled for private Organization repositories) and Fine-grained PATs (`Contents: Read/Write`, `Pull Requests: Read/Write`). Attaches `UsernamePasswordCredentialsProvider(token, "")` for JGit cloning/pushing and `Bearer <token>` for REST API PR creation without requiring a GitHub username parameter.
 
-#### 7. Kafka Error Handling & Recovery (`TaskEventConsumerRecordRecoverer`)
+#### 7. Slack Notification Dispatch Port (`SendNotificationPort` & `SlackWebhookNotificationAdapter`)
+- **`SendNotificationPort`**: Outbound port providing `sendNotification(NotificationRequest request)` (`dev.synapse.domain.notification.SendNotificationPort`) to notify developers and channels of task lifecycle outcomes.
+- **`SlackWebhookNotificationAdapter`**: Uses Spring `RestClient` (`@Qualifier("slackRestClient")`) with Block Kit formatting to dispatch real-time Slack notifications on successful pull request creation (`notifySuccess` with PR URL and commit diff) or diagnostic task failures (`notifyFailure` with error logs).
+
+#### 8. Kafka Error Handling & Recovery (`TaskEventConsumerRecordRecoverer`)
 - **Retry Logic**: Configured with Spring Kafka `DefaultErrorHandler`. If an exception occurs during task processing, Kafka retries with exponential backoff.
 - **Dead-Letter / Terminal Failure Handling**: When retry attempts are exhausted, `TaskEventConsumerRecordRecoverer` invokes `TaskWorkflowApplicationService.handleFailedSubmission(taskId, reason)`, which transitions the task status to `FAILED`.
 - **MongoDB Object Versioning (`@Version Long version`)**: `TaskDocument` uses object wrapper `Long version` so Spring Data MongoDB correctly distinguishes new insertions (`version == null` $\rightarrow$ `insertOne`) from updates (`replaceOne`), preventing `E11000 duplicate key errors` during failure state updates.
 
-#### 8. Distributed Tracing & Correlation ID Standardization (`OpenTelemetry` & `CorrelationIdRecordInterceptor`)
+#### 9. Distributed Tracing & Correlation ID Standardization (`OpenTelemetry` & `CorrelationIdRecordInterceptor`)
 - **Standardized Key**: Uses `correlationId` consistently across Spring Boot 4 Micrometer Tracing (`management.tracing.baggage.correlation.fields`), Kafka record headers (`KafkaHeaderNames.CORRELATION_ID`), and `logback.xml` (`%X{correlationId}`).
 - **Producer W3C Baggage (`Tracer.createBaggageInScope`)**: When `PendingEventPublishJob` dispatches outbox events, it wraps publication inside `tracer.createBaggageInScope(TracingContext.CORRELATION_ID_KEY, s.correlationId())`, allowing `micrometer-tracing-bridge-otel` to automatically format and transmit W3C `traceparent` and `baggage: correlationId=...` headers across Kafka (`observation-enabled=true`).
 - **Consumer Anti-Corruption Layer (`CorrelationIdRecordInterceptor`)**: Encapsulated in its own dedicated component inside `dev.synapse.adapter.in.messaging.interceptor`. Before any `@KafkaListener` executes or when `TaskEventConsumerRecordRecoverer` handles DLQ recovery, `CorrelationIdRecordInterceptor.extractAndSet(record)` guarantees that `correlationId` is extracted from W3C baggage or direct Kafka headers and bound to `TracingContext` (`MDC`), preventing missing correlation IDs across rolling restarts, retries, or heterogeneous producers.
 ---
 
-## 3. Future Architecture (To-Be Notification Pipeline)
+## 3. Implemented Notification Pipeline (`SendNotificationPort`)
 
-With workspace provisioning, Jira enrichment, Git cloning/pushing, Aider execution, and PR creation fully implemented, the remaining stage of the Synapse pipeline is Slack notification dispatch (`NotificationPort`).
+With workspace provisioning, Jira enrichment, Git cloning/pushing, Aider execution, and PR creation implemented, the final stage of the Synapse pipeline is Slack notification dispatch (`SendNotificationPort`).
 
 ```mermaid
 flowchart TD
@@ -155,22 +166,22 @@ flowchart TD
 
     AppService["TaskWorkflowApplicationService (Workflow Orchestrator)"]:::core
 
-    subgraph FUTURE_PORTS [To-Be Outbound Ports]
-        NotifyPort(["NotificationPort"]):::port
+    subgraph OUTBOUND_PORTS [Implemented Outbound Ports]
+        NotifyPort(["SendNotificationPort"]):::port
     end
 
-    subgraph FUTURE_ADAPTERS [To-Be Adapters]
+    subgraph OUTBOUND_ADAPTERS [Implemented Outbound Adapters]
         SlackNotifyAdapter["SlackWebhookNotificationAdapter"]:::adapter
     end
 
     subgraph EXTERNAL_SYSTEMS [External Services]
-        Slack["Slack Channel / User DM"]:::external
+        Slack["Slack Channel / User DM via Webhook"]:::external
     end
 
-    AppService -->|"notify(result, prUrl)"| NotifyPort --> SlackNotifyAdapter --> Slack
+    AppService -->|"sendNotification(request)"| NotifyPort --> SlackNotifyAdapter --> Slack
 ```
 
-1. **Notification Dispatch (`NotificationPort` / `SlackWebhookNotificationAdapter`)**: Sends structured Slack messages summarizing the PR diff (`prUrl`) or reporting diagnostic logs if the task fails.
+1. **Notification Dispatch (`SendNotificationPort` / `SlackWebhookNotificationAdapter`)**: Uses Spring `RestClient` (`@Qualifier("slackRestClient")`) to dispatch Block Kit structured Slack messages when a task succeeds (`notifySuccess` with PR link (`prUrl`) and commit diff summary) or fails (`notifyFailure` with diagnostic error logs).
 
 ---
 ---
@@ -323,6 +334,16 @@ sequenceDiagram
     - `Task` Ports: `SaveTaskPort`, `LoadTaskPort`
     - `DomainEvent` Ports: `SaveDomainEventPort`, `LoadDomainEventPort`, `UpdateDomainEventPort`
   - **Interface Segregation Principle (ISP)**:
-    - **`SaveDomainEventPort`**: Declares only `void save(DomainEvent event)`, injected exclusively into application use case handlers (`SubmitTaskUseCaseHandler`) without any outbox polling methods.
-    - **`LoadDomainEventPort` & `UpdateDomainEventPort`**: Declared specifically for the outbox publisher (`PendingEventPublishJob`), isolating pending event retrieval and status updates from general entity saving.
   - **Composite Adapter (`MongoEventStoreAdapter`)**: Implements `SaveDomainEventPort, LoadDomainEventPort, UpdateDomainEventPort`, keeping MongoDB persistence encapsulated behind segregated Hexagonal interfaces.
+
+### ADR-8: Pre-Flight Repository Handshake (`validateRepositoryExists`) & Dynamic PR Base Branch Discovery
+- **Context**: When tasks are submitted with invalid repository URLs, expired tokens, or targeting repositories whose default branch is `master` or `develop` instead of `main`, failures previously happened deep inside the Docker execution phase or when calling GitHub's `POST /pulls` API (`422 Unprocessable Content`). This wasted compute resources on sandbox provisioning and produced opaque errors.
+- **Decision**:
+  - **Pre-flight Remote Reference Handshake**: Added `GitRepositoryPort.validateRepositoryExists(repoUrl)` right before workspace provisioning in `TaskWorkflowApplicationService`. Using JGit `lsRemoteRepository()`, Synapse performs a lightweight HTTPS handshake to verify repository existence and token read permissions early, failing fast (`handleFailedSubmission`) if invalid.
+  - **Dynamic Base Branch Discovery**: Updated `GitHubRestPullRequestAdapter.resolveBaseBranch()` to query `GET /repos/{owner}/{repo}` when `synapse.git.default-base-branch` is `"main"` or unset. By discovering the repository's exact `default_branch` at runtime, we eliminate `422 Unprocessable Content (base: invalid)` errors across multi-repository environments.
+
+### ADR-9: Slack Ingestion Deduplication (`app_mention` vs `message`) & Webhook Retry Protection (`X-Slack-Retry-Num`)
+- **Context**: When Synapse's Slack App subscribes to both `app_mentions:read` (`app_mention`) and `message.channels` (`message`), mentioning `@Synapse` in a public channel triggers two simultaneous webhook deliveries from Slack. Furthermore, if network latency or Kafka outbox processing exceeds 3 seconds, Slack retries delivery up to 3 times (`X-Slack-Retry-Num`), leading to duplicate `SubmitTaskCommand` executions.
+- **Decision**:
+  - **Inbound Event Deduplication (`SlackPayloadTranslator`)**: Separated event translation rules so that `app_mention` is exclusively responsible for handling explicit `@mentions` in channels (`C...`/`G...`). Accompanying `message` events in channels are ignored (`Optional.empty()`), while `message` events in Direct Messages (`D...` / `im`) are processed directly.
+  - **HTTP Header Retry Interception (`SlackTaskRestAdapter`)**: Added `@RequestHeader(value = "X-Slack-Retry-Num", required = false)` checking in `handleEvents()`. Any request containing this header is logged and immediately acknowledged (`200 OK`) without invoking `SubmitTaskUseCase`.

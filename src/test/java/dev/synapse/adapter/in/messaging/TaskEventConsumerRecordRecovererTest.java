@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 
 import static org.mockito.Mockito.verify;
 
@@ -18,11 +19,14 @@ class TaskEventConsumerRecordRecovererTest {
     @Mock
     private TaskWorkflowApplicationService taskWorkflowApplicationService;
 
+    @Mock
+    private DeadLetterPublishingRecoverer deadLetterPublishingRecoverer;
+
     @InjectMocks
     private TaskEventConsumerRecordRecoverer recoverer;
 
     @Test
-    void accept_ShouldDelegateToApplicationService_WhenRecordIsTaskSubmittedEvent() {
+    void accept_ShouldDelegateToApplicationServiceAndDlq_WhenRecordIsTaskSubmittedEvent() {
         // given
         Task.TaskId taskId = Task.TaskId.generate();
         TaskSubmittedEvent event = new TaskSubmittedEvent(taskId, "Fix bug", "SLACK");
@@ -34,5 +38,6 @@ class TaskEventConsumerRecordRecovererTest {
 
         // then
         verify(taskWorkflowApplicationService).handleFailedSubmission(taskId, "Kafka delivery failed");
+        verify(deadLetterPublishingRecoverer).accept(eventRecord, exception);
     }
 }

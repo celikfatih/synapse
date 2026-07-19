@@ -17,9 +17,6 @@ public class GitHubRestPullRequestAdapter implements CreatePullRequestPort {
     private final GitProperties gitProperties;
     private final RestClient gitRestClient;
 
-    record PullRequestRequest(String title, String body, String head, String base) {}
-    record PullRequestResponse(@JsonProperty("html_url") String htmlUrl) {}
-
     @Override
     public String createPullRequest(String repositoryUrl, String branchName, String title, String body) {
         if (repositoryUrl == null || repositoryUrl.isBlank() || branchName == null || branchName.isBlank()) {
@@ -32,9 +29,7 @@ public class GitHubRestPullRequestAdapter implements CreatePullRequestPort {
             String owner = ownerAndRepo[0];
             String repo = ownerAndRepo[1];
 
-            String baseBranch = (gitProperties != null && gitProperties.getDefaultBaseBranch() != null && !gitProperties.getDefaultBaseBranch().isBlank())
-                    ? gitProperties.getDefaultBaseBranch()
-                    : "main";
+            String baseBranch = resolveBaseBranch(owner, repo);
             PullRequestRequest payload = new PullRequestRequest(title, body, branchName, baseBranch);
             log.info("Creating GitHub Pull Request for [{}/{}] head [{}] -> base [{}]", owner, repo, branchName, baseBranch);
 
@@ -54,6 +49,34 @@ public class GitHubRestPullRequestAdapter implements CreatePullRequestPort {
                     repositoryUrl, branchName, e.getMessage());
         }
         return "";
+    }
+
+    private String resolveBaseBranch(String owner, String repo) {
+        if (gitProperties != null && gitProperties.getDefaultBaseBranch() != null
+                && !gitProperties.getDefaultBaseBranch().isBlank()
+                && !"main".equals(gitProperties.getDefaultBaseBranch())) {
+            return gitProperties.getDefaultBaseBranch();
+        }
+
+        try {
+            log.debug("Fetching repository metadata from GitHub API to determine default base branch for [{}/{}]", owner, repo);
+            RepoMetadataResponse repoMeta = gitRestClient.get()
+                    .uri("/repos/{owner}/{repo}", owner, repo)
+                    .retrieve()
+                    .body(RepoMetadataResponse.class);
+
+            if (repoMeta != null && repoMeta.defaultBranch() != null && !repoMeta.defaultBranch().isBlank()) {
+                log.info("Resolved default base branch [{}] from GitHub API for repository [{}/{}]", repoMeta.defaultBranch(), owner, repo);
+                return repoMeta.defaultBranch();
+            }
+        } catch (Throwable t) {
+            log.debug("Could not fetch repository metadata for [{}/{}], using fallback branch: {}",
+                    owner, repo, t.getMessage());
+        }
+
+        return (gitProperties != null && gitProperties.getDefaultBaseBranch() != null && !gitProperties.getDefaultBaseBranch().isBlank())
+                ? gitProperties.getDefaultBaseBranch()
+                : "main";
     }
 
     private String[] parseOwnerAndRepo(String repositoryUrl) {
@@ -80,4 +103,8 @@ public class GitHubRestPullRequestAdapter implements CreatePullRequestPort {
         }
         throw new IllegalArgumentException("Cannot parse owner and repo from repository URL: " + repositoryUrl);
     }
+
+    record PullRequestRequest(String title, String body, String head, String base) {}
+    record PullRequestResponse(@JsonProperty("html_url") String htmlUrl) {}
+    record RepoMetadataResponse(@JsonProperty("default_branch") String defaultBranch) {}
 }

@@ -6,10 +6,13 @@ import dev.synapse.application.port.out.GitRepositoryPort;
 import dev.synapse.application.port.out.JiraEnrichmentPort;
 import dev.synapse.application.port.out.LoadTaskPort;
 import dev.synapse.application.port.out.SaveTaskPort;
+import dev.synapse.application.port.out.SendNotificationPort;
 import dev.synapse.application.port.out.WorkspaceProvisioningPort;
 import dev.synapse.domain.agent.AgentExecutionRequest;
 import dev.synapse.domain.agent.AgentExecutionResult;
+import dev.synapse.domain.agent.AgentWorkspaceExecution;
 import dev.synapse.domain.event.TaskSubmittedEvent;
+import dev.synapse.domain.notification.NotificationRequest;
 import dev.synapse.domain.task.EnrichedTaskContext;
 import dev.synapse.domain.task.ParsedTaskPrompt;
 import dev.synapse.domain.task.Task;
@@ -18,6 +21,7 @@ import dev.synapse.domain.workspace.ProvisionedWorkspace;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.nio.file.Path;
 
@@ -33,6 +37,7 @@ public class TaskWorkflowApplicationService {
     private final GitRepositoryPort gitRepositoryPort;
     private final AgenticExecutionPort agenticExecutionPort;
     private final CreatePullRequestPort createPullRequestPort;
+    private final SendNotificationPort sendNotificationPort;
 
     public void handleSubmitted(TaskSubmittedEvent event) {
         log.info("Handling TaskSubmittedEvent for taskId: {}", event.taskId().getValue());
@@ -43,12 +48,47 @@ public class TaskWorkflowApplicationService {
 
         ParsedTaskPrompt parsedPrompt = ParsedTaskPrompt.parse(task.getMessage().value());
 
-        EnrichedTaskContext enrichedContext = jiraEnrichmentPort.enrichTask(parsedPrompt.ticketKey());
+        EnrichedTaskContext enrichedContext = StringUtils.hasText(parsedPrompt.ticketKey())
+                ? jiraEnrichmentPort.enrichTask(parsedPrompt.ticketKey())
+                : EnrichedTaskContext.empty("");
         log.info("Enriched Jira Task Context for ticketKey: {}", enrichedContext.ticketKey());
 
         String targetRepositoryUrl = parsedPrompt.repositoryUrl()
                 .orElse(enrichedContext.targetRepositoryUrl());
 
+        if (targetRepositoryUrl == null || targetRepositoryUrl.isBlank()) {
+            String errorMsg = "Task submission failed: Missing required target repository. Please include --repo <url> in your command or specify a valid Jira ticket with a configured repository.";
+            log.error("Aborting execution for taskId [{}]: {}", task.getId().getValue(), errorMsg);
+            finalizeFailedTask(task, AgentExecutionResult.failure(task.getId().getValue(), errorMsg, ""));
+            saveTaskPort.save(task);
+            return;
+        }
+
+        if (!gitRepositoryPort.validateRepositoryExists(targetRepositoryUrl)) {
+            String errorMsg = "Task submission failed: Repository [" + targetRepositoryUrl + "] is invalid, inaccessible, or does not exist. Please check your --repo flag or repository credentials.";
+            log.error("Aborting execution for taskId [{}]: {}", task.getId().getValue(), errorMsg);
+            finalizeFailedTask(task, AgentExecutionResult.failure(task.getId().getValue(), errorMsg, ""));
+            saveTaskPort.save(task);
+            return;
+        }
+
+        AgentWorkspaceExecution execution = provisionAndExecuteAgent(task, parsedPrompt, enrichedContext, targetRepositoryUrl);
+
+        if (execution.executionResult().success()) {
+            finalizeSuccessfulTask(task, parsedPrompt, enrichedContext, execution.workspace(),
+                    targetRepositoryUrl, execution.executionResult());
+        } else {
+            finalizeFailedTask(task, execution.executionResult());
+        }
+        saveTaskPort.save(task);
+    }
+
+    private AgentWorkspaceExecution provisionAndExecuteAgent(
+            Task task,
+            ParsedTaskPrompt parsedPrompt,
+            EnrichedTaskContext enrichedContext,
+            String targetRepositoryUrl
+    ) {
         ProvisionedWorkspace provisionedWorkspace = workspaceProvisioningPort.provisionWorkspace(
                 task.getId().getValue(),
                 targetRepositoryUrl
@@ -71,14 +111,18 @@ public class TaskWorkflowApplicationService {
         AgentExecutionResult executionResult = agenticExecutionPort.execute(executionRequest);
         log.info("Agentic execution finished with success [{}] for taskId: {}",
                 executionResult.success(), task.getId().getValue());
+        return new AgentWorkspaceExecution(provisionedWorkspace, executionResult);
+    }
 
-        if (executionResult.success()) {
-            finalizeSuccessfulTask(task, parsedPrompt, enrichedContext, provisionedWorkspace,
-                    targetRepositoryUrl, executionResult);
-        } else {
-            task.fail();
-        }
-        saveTaskPort.save(task);
+    private void finalizeFailedTask(Task task, AgentExecutionResult executionResult) {
+        task.fail();
+        sendNotificationPort.sendNotification(NotificationRequest.failure(
+                task.getId().getValue(),
+                task.getCorrelationId().value(),
+                task.getRequester().name(),
+                task.getSource().value(),
+                "Agentic execution failed: " + executionResult.summary()
+        ));
     }
 
     private void finalizeSuccessfulTask(
@@ -100,10 +144,21 @@ public class TaskWorkflowApplicationService {
 
         String prUrl = createPullRequestPort.createPullRequest(targetRepositoryUrl, workspace.branchName(), prTitle, prBody);
         log.info("Pull Request created successfully [{}] for taskId: {}", prUrl, task.getId().getValue());
+        String notificationSummary = executionResult.summary();
         if (prUrl != null && !prUrl.isBlank()) {
             task.attachPullRequestUrl(prUrl);
+        } else {
+            notificationSummary += "\n\n⚠️ Note: Pull Request could not be created automatically. Please check remote repository access or branch configuration.";
         }
         task.complete();
+        sendNotificationPort.sendNotification(NotificationRequest.success(
+                task.getId().getValue(),
+                task.getCorrelationId().value(),
+                task.getRequester().name(),
+                task.getSource().value(),
+                notificationSummary,
+                prUrl
+        ));
     }
 
     private String resolveTicketKey(Task task, EnrichedTaskContext enrichedContext) {
@@ -183,6 +238,13 @@ public class TaskWorkflowApplicationService {
                 && task.getStatus() != TaskStatus.COMPLETED) {
             task.fail();
             saveTaskPort.save(task);
+            sendNotificationPort.sendNotification(NotificationRequest.failure(
+                    taskId.getValue(),
+                    task.getCorrelationId().value(),
+                    task.getRequester().name(),
+                    task.getSource().value(),
+                    reason
+            ));
         }
     }
 }

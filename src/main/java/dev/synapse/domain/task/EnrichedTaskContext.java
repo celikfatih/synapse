@@ -16,4 +16,8 @@ public record EnrichedTaskContext(
         Objects.requireNonNull(description, "description cannot be null");
         acceptanceCriteria = acceptanceCriteria == null ? List.of() : List.copyOf(acceptanceCriteria);
     }
+
+    public static EnrichedTaskContext empty(String ticketKey) {
+        return new EnrichedTaskContext(ticketKey, "", "", List.of(), null);
+    }
 }

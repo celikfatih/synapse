@@ -50,11 +50,8 @@ decisions when appropriate.
 
 ## Scope
 
-This Code of Conduct applies within all community spaces, and also applies when
-an individual is officially representing the community in public spaces.
-Examples of representing our community include using an official e-mail address,
-posting via an official social media account, or acting as an appointed
-representative at an online or offline event.
+This Code of Conduct applies within all community spaces, including GitHub repositories, issue trackers, pull reviews, and all connected messaging platforms such as **Synapse Slack workspaces and communication channels (`#synapse-alerts`, bot DMs, `@synapse` app mentions, and slash commands)**. It also applies when an individual is officially representing the community in public spaces.
+Examples of representing our community include using an official e-mail address, posting via an official social media account, or acting as an appointed representative at an online or offline event.
 
 ## Enforcement
 

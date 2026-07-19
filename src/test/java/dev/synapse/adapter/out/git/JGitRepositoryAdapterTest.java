@@ -103,5 +103,30 @@ class JGitRepositoryAdapterTest {
             assertThat(branchRef).isNotNull();
         }
     }
+
+    @Test
+    void validateRepositoryExists_ShouldReturnTrue_WhenRepositoryIsValidAndAccessible(@TempDir Path tempOriginDir) throws Exception {
+        // given
+        try (org.eclipse.jgit.api.Git git = org.eclipse.jgit.api.Git.init().setDirectory(tempOriginDir.toFile()).call()) {
+            File readme = new File(tempOriginDir.toFile(), "README.md");
+            Files.writeString(readme.toPath(), "# Valid Repo");
+            git.add().addFilepattern("README.md").call();
+            git.commit().setMessage("Initial commit").call();
+        }
+        String originRepoUri = tempOriginDir.toAbsolutePath().toUri().toString();
+
+        // when
+        boolean result = adapter.validateRepositoryExists(originRepoUri);
+
+        // then
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void validateRepositoryExists_ShouldReturnFalse_WhenRepositoryDoesNotExistOrIsBlank() {
+        assertThat(adapter.validateRepositoryExists("")).isFalse();
+        assertThat(adapter.validateRepositoryExists(null)).isFalse();
+        assertThat(adapter.validateRepositoryExists("file:///non/existent/path/to/repo.git")).isFalse();
+    }
 }
 

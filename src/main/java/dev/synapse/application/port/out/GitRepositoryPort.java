@@ -17,4 +17,11 @@ public interface GitRepositoryPort {
      * @param commitMessage the message to be used for the commit.
      */
     void commitAndPush(Path workspacePath, String commitMessage);
+
+    /**
+     * Validates whether a remote repository exists and is accessible.
+     * @param repositoryUrl the URL of the repository to validate.
+     * @return true if the repository exists and is valid, false otherwise.
+     */
+    boolean validateRepositoryExists(String repositoryUrl);
 }

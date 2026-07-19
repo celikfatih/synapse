@@ -6,10 +6,12 @@ import dev.synapse.application.port.out.GitRepositoryPort;
 import dev.synapse.application.port.out.JiraEnrichmentPort;
 import dev.synapse.application.port.out.LoadTaskPort;
 import dev.synapse.application.port.out.SaveTaskPort;
+import dev.synapse.application.port.out.SendNotificationPort;
 import dev.synapse.application.port.out.WorkspaceProvisioningPort;
 import dev.synapse.domain.agent.AgentExecutionRequest;
 import dev.synapse.domain.agent.AgentExecutionResult;
 import dev.synapse.domain.event.TaskSubmittedEvent;
+import dev.synapse.domain.notification.NotificationRequest;
 import dev.synapse.domain.task.EnrichedTaskContext;
 import dev.synapse.domain.task.Task;
 import dev.synapse.domain.task.TaskStatus;
@@ -54,6 +56,9 @@ class TaskWorkflowApplicationServiceTest {
     @Mock
     private CreatePullRequestPort createPullRequestPort;
 
+    @Mock
+    private SendNotificationPort sendNotificationPort;
+
     @InjectMocks
     private TaskWorkflowApplicationService taskWorkflowApplicationService;
 
@@ -81,6 +86,7 @@ class TaskWorkflowApplicationServiceTest {
 
         when(loadTaskPort.findById(event.taskId())).thenReturn(task);
         when(jiraEnrichmentPort.enrichTask("PAY-1042")).thenReturn(enrichedContext);
+        when(gitRepositoryPort.validateRepositoryExists("git@github.com:override/repo.git")).thenReturn(true);
         when(workspaceProvisioningPort.provisionWorkspace(task.getId().getValue(), "git@github.com:override/repo.git"))
                 .thenReturn(provisionedWorkspace);
         when(agenticExecutionPort.execute(any())).thenReturn(
@@ -95,11 +101,13 @@ class TaskWorkflowApplicationServiceTest {
         // then
         verify(loadTaskPort).findById(event.taskId());
         verify(jiraEnrichmentPort).enrichTask("PAY-1042");
+        verify(gitRepositoryPort).validateRepositoryExists("git@github.com:override/repo.git");
         verify(workspaceProvisioningPort).provisionWorkspace(task.getId().getValue(), "git@github.com:override/repo.git");
         verify(agenticExecutionPort).execute(any(AgentExecutionRequest.class));
         verify(gitRepositoryPort).commitAndPush(any(), any());
         verify(createPullRequestPort).createPullRequest(any(), any(), any(), any());
         verify(saveTaskPort, times(2)).save(task);
+        verify(sendNotificationPort).sendNotification(any(NotificationRequest.class));
         assertThat(task.getStatus()).isEqualTo(TaskStatus.COMPLETED);
         assertThat(task.getPullRequestUrl()).isEqualTo(new dev.synapse.domain.task.PullRequestUrl("https://github.com/override/repo/pull/1"));
     }
@@ -128,6 +136,7 @@ class TaskWorkflowApplicationServiceTest {
 
         when(loadTaskPort.findById(event.taskId())).thenReturn(task);
         when(jiraEnrichmentPort.enrichTask("PAY-1042")).thenReturn(enrichedContext);
+        when(gitRepositoryPort.validateRepositoryExists("git@github.com:jira-default/repo.git")).thenReturn(true);
         when(workspaceProvisioningPort.provisionWorkspace(task.getId().getValue(), "git@github.com:jira-default/repo.git"))
                 .thenReturn(provisionedWorkspace);
         when(agenticExecutionPort.execute(any())).thenReturn(
@@ -142,6 +151,7 @@ class TaskWorkflowApplicationServiceTest {
         // then
         verify(loadTaskPort).findById(event.taskId());
         verify(jiraEnrichmentPort).enrichTask("PAY-1042");
+        verify(gitRepositoryPort).validateRepositoryExists("git@github.com:jira-default/repo.git");
         verify(workspaceProvisioningPort).provisionWorkspace(task.getId().getValue(), "git@github.com:jira-default/repo.git");
         verify(gitRepositoryPort).cloneAndCheckout(
                 "git@github.com:jira-default/repo.git",
@@ -152,6 +162,7 @@ class TaskWorkflowApplicationServiceTest {
         verify(gitRepositoryPort).commitAndPush(any(), any());
         verify(createPullRequestPort).createPullRequest(any(), any(), any(), any());
         verify(saveTaskPort, times(2)).save(task);
+        verify(sendNotificationPort).sendNotification(any(NotificationRequest.class));
         assertThat(task.getStatus()).isEqualTo(TaskStatus.COMPLETED);
         assertThat(task.getPullRequestUrl()).isEqualTo(new dev.synapse.domain.task.PullRequestUrl("https://github.com/jira-default/repo/pull/2"));
     }
@@ -172,6 +183,7 @@ class TaskWorkflowApplicationServiceTest {
 
         when(loadTaskPort.findById(event.taskId())).thenReturn(task);
         when(jiraEnrichmentPort.enrichTask("PAY-1042")).thenReturn(enrichedContext);
+        when(gitRepositoryPort.validateRepositoryExists("git@github.com:jira-default/repo.git")).thenReturn(true);
         when(workspaceProvisioningPort.provisionWorkspace(any(), any())).thenReturn(provisionedWorkspace);
         when(agenticExecutionPort.execute(any())).thenReturn(
                 AgentExecutionResult.failure(task.getId().getValue(), "Failed", "logs")
@@ -182,6 +194,7 @@ class TaskWorkflowApplicationServiceTest {
 
         // then
         verify(saveTaskPort, times(2)).save(task);
+        verify(sendNotificationPort).sendNotification(any(NotificationRequest.class));
         assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
     }
 
@@ -216,6 +229,7 @@ class TaskWorkflowApplicationServiceTest {
         // then
         assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
         verify(saveTaskPort).save(task);
+        verify(sendNotificationPort).sendNotification(any(NotificationRequest.class));
     }
 
     @Test
@@ -231,5 +245,51 @@ class TaskWorkflowApplicationServiceTest {
         // then
         assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
         verify(saveTaskPort, times(0)).save(task);
+    }
+
+    @Test
+    void handleSubmitted_ShouldAbortAndSendFailureNotification_WhenTargetRepositoryUrlIsMissing() {
+        // given
+        String rawMessage = "Fix refund bug without repo";
+        Task task = new Task("developer", rawMessage, "corr-123", "SLACK");
+        TaskSubmittedEvent event = new TaskSubmittedEvent(task.getId(), rawMessage, "SLACK");
+
+        when(loadTaskPort.findById(event.taskId())).thenReturn(task);
+
+        // when
+        taskWorkflowApplicationService.handleSubmitted(event);
+
+        // then
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+        verify(saveTaskPort, times(2)).save(task);
+        verify(sendNotificationPort).sendNotification(any(NotificationRequest.class));
+        verify(agenticExecutionPort, times(0)).execute(any());
+    }
+
+    @Test
+    void handleSubmitted_ShouldAbortAndNotCreateWorkspace_WhenRepositoryValidationFails() {
+        // given
+        String rawMessage = "PAY-1042 Fix refund --repo git@github.com:invalid/repo.git";
+        Task task = new Task("developer", rawMessage, "corr-123", "SLACK");
+        TaskSubmittedEvent event = new TaskSubmittedEvent(task.getId(), rawMessage, "SLACK");
+
+        EnrichedTaskContext enrichedContext = new EnrichedTaskContext(
+                "PAY-1042", "Summary", "Description", List.of("AC1"), "git@github.com:jira-default/repo.git"
+        );
+
+        when(loadTaskPort.findById(event.taskId())).thenReturn(task);
+        when(jiraEnrichmentPort.enrichTask("PAY-1042")).thenReturn(enrichedContext);
+        when(gitRepositoryPort.validateRepositoryExists("git@github.com:invalid/repo.git")).thenReturn(false);
+
+        // when
+        taskWorkflowApplicationService.handleSubmitted(event);
+
+        // then
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+        verify(gitRepositoryPort).validateRepositoryExists("git@github.com:invalid/repo.git");
+        verify(workspaceProvisioningPort, times(0)).provisionWorkspace(any(), any());
+        verify(agenticExecutionPort, times(0)).execute(any());
+        verify(saveTaskPort, times(2)).save(task);
+        verify(sendNotificationPort).sendNotification(any(NotificationRequest.class));
     }
 }

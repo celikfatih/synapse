@@ -27,7 +27,7 @@ public class JiraRestAdapter implements JiraEnrichmentPort {
         }
         String cleanTicketKey = ticketKey.trim();
 
-        JiraIssue issue = getJiraIssue(ticketKey);
+        JiraIssue issue = getJiraIssue(cleanTicketKey);
 
         return new EnrichedTaskContext(
                 cleanTicketKey,

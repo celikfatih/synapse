@@ -34,6 +34,9 @@ class GitHubRestPullRequestAdapterTest {
                 builder.build()
         );
 
+        server.expect(requestTo("https://api.github.com/repos/celikfatih/synapse"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"default_branch\": \"main\"}", MediaType.APPLICATION_JSON));
         server.expect(requestTo("https://api.github.com/repos/celikfatih/synapse/pulls"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Authorization", "Bearer test-token"))
@@ -65,6 +68,9 @@ class GitHubRestPullRequestAdapterTest {
                 builder.build()
         );
 
+        server.expect(requestTo("https://api.github.com/repos/org/repo"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"default_branch\": \"main\"}", MediaType.APPLICATION_JSON));
         server.expect(requestTo("https://api.github.com/repos/org/repo/pulls"))
                 .andRespond(withSuccess("{\"html_url\": \"https://github.com/org/repo/pull/1\"}", MediaType.APPLICATION_JSON));
 
@@ -114,6 +120,9 @@ class GitHubRestPullRequestAdapterTest {
                 builder.build()
         );
 
+        server.expect(requestTo("https://api.github.com/repos/celikfatih/synapse"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"default_branch\": \"main\"}", MediaType.APPLICATION_JSON));
         server.expect(requestTo("https://api.github.com/repos/celikfatih/synapse/pulls"))
                 .andRespond(withStatus(HttpStatus.UNPROCESSABLE_CONTENT));
 

@@ -33,7 +33,7 @@ public record ParsedTaskPrompt(
             prompt = repoMatcher.replaceAll("").trim();
         }
 
-        String ticketKey = prompt;
+        String ticketKey = "";
         Matcher ticketMatcher = TICKET_KEY_PATTERN.matcher(prompt);
         if (ticketMatcher.find()) {
             ticketKey = ticketMatcher.group();
